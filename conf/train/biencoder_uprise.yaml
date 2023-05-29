@@ -25,3 +25,4 @@ val_av_rank_hard_neg: ${.hard_negatives}
 val_av_rank_other_neg: ${.other_negatives}
 val_av_rank_bsz: 128
 val_av_rank_max_qs: 10000
+num_save_epochs: 1

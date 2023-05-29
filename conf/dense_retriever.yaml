@@ -25,7 +25,7 @@ encoded_ctx_files: []
 out_file:
 # "regex" or "string"
 match: string
-n_docs: 100
+n_docs: 50
 validation_workers: 16
 
 # Batch size to generate query embeddings
@@ -50,17 +50,10 @@ kilt_out_file:
 model_file:
 
 validate_as_tables: False
-
-# RPC settings
 rpc_retriever_cfg_file:
-rpc_index_id:
-use_l2_conversion: False
-use_rpc_meta: False
-rpc_meta_compressed: False
-
 indexer: flat
 
-# tokens which won't be slit by tokenizer
+# tokens which won't be split by tokenizer
 special_tokens:
 
 # TODO: move to a conf group
@@ -69,7 +62,6 @@ local_rank: -1
 global_loss_buf_sz: 150000
 device:
 distributed_world_size:
-distributed_port:
 no_cuda: False
 n_gpu:
 fp16: False

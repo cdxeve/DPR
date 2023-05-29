@@ -28,9 +28,39 @@ NQ_LICENSE_FILES = [
 ]
 
 RESOURCES_MAP = {
+    "data.retriever.break-train-q": {
+        "s3_url": "https://dl.fbaipublicfiles.com/dpr/data/retriever/biencoder-break-train-q.json.gz",
+        "original_ext": ".json",
+        "compressed": True,
+        "desc": "TriviaQA train subset with passages pools for the Retriever training",
+    },
+    "data.retriever.break-train-qd": {
+        "s3_url": "https://dl.fbaipublicfiles.com/dpr/data/retriever/biencoder-break-train-qd.json.gz",
+        "original_ext": ".json",
+        "compressed": True,
+        "desc": "TriviaQA train subset with passages pools for the Retriever training",
+    },
+    "data.retriever.break-train-d": {
+        "s3_url": "https://dl.fbaipublicfiles.com/dpr/data/retriever/biencoder-break-train-d.json.gz",
+        "original_ext": ".json",
+        "compressed": True,
+        "desc": "TriviaQA train subset with passages pools for the Retriever training",
+    },
     "data.wikipedia_split.psgs_w100": {
         "s3_url": "https://dl.fbaipublicfiles.com/dpr/wikipedia_split/psgs_w100.tsv.gz",
         "original_ext": ".tsv",
+        "compressed": True,
+        "desc": "Entire wikipedia passages set obtain by splitting all pages into 100-word segments (no overlap)",
+    },
+    "data.wikipedia_split.entities": {
+        "s3_url": "https://dl.fbaipublicfiles.com/dpr/wikipedia_split/entities.tsv.gz",
+        "original_ext": ".tsv",
+        "compressed": True,
+        "desc": "Entire wikipedia passages set obtain by splitting all pages into 100-word segments (no overlap)",
+    },
+    "data.wikipedia_split.break_train": {
+        "s3_url": "https://dl.fbaipublicfiles.com/dpr/wikipedia_split/break_train.json.gz",
+        "original_ext": ".json",
         "compressed": True,
         "desc": "Entire wikipedia passages set obtain by splitting all pages into 100-word segments (no overlap)",
     },
@@ -66,6 +96,18 @@ RESOURCES_MAP = {
         "original_ext": ".json",
         "compressed": True,
         "desc": "TriviaQA train subset with passages pools for the Retriever training",
+    },
+    "data.retriever.grailqa-train": {
+        "s3_url": "https://dl.fbaipublicfiles.com/dpr/data/retriever/biencoder-grailqa-train.json.gz",
+        "original_ext": ".json",
+        "compressed": True,
+        "desc": "TriviaQA train subset with passages pools for the Retriever training",
+    },
+    "data.retriever.grailqa-dev": {
+        "s3_url": "https://dl.fbaipublicfiles.com/dpr/data/retriever/biencoder-grailqa-dev.json.gz",
+        "original_ext": ".json",
+        "compressed": True,
+        "desc": "TriviaQA dev subset with passages pools for the Retriever training",
     },
     "data.retriever.squad1-train": {
         "s3_url": "https://dl.fbaipublicfiles.com/dpr/data/retriever/biencoder-squad1-train.json.gz",
@@ -131,6 +173,25 @@ RESOURCES_MAP = {
         "compressed": True,
         "desc": "Trivia dev subset for Retriever validation and IR results generation",
     },
+    "data.retriever.qas.break-dev": {
+        "s3_url": "https://dl.fbaipublicfiles.com/dpr/data/retriever/break-dev.qa.jsonl.gz",
+        "original_ext": ".jsonl",
+        "compressed": True,
+        "desc": "Trivia dev subset for Retriever validation and IR results generation",
+    },
+
+    "data.retriever.qas.break-train": {
+        "s3_url": "https://dl.fbaipublicfiles.com/dpr/data/retriever/break-train.qa.jsonl.gz",
+        "original_ext": ".jsonl",
+        "compressed": True,
+        "desc": "Trivia dev subset for Retriever validation and IR results generation",
+    },
+    "data.retriever.qas.grailqa-dev": {
+        "s3_url": "https://dl.fbaipublicfiles.com/dpr/data/retriever/grailqa-dev.qa.tsv.gz",
+        "original_ext": ".tsv",
+        "compressed": True,
+        "desc": "Trivia dev subset for Retriever validation and IR results generation",
+    },
     "data.retriever.qas.trivia-test": {
         "s3_url": "https://dl.fbaipublicfiles.com/dpr/data/retriever/trivia-test.qa.csv.gz",
         "original_ext": ".csv",
@@ -140,6 +201,12 @@ RESOURCES_MAP = {
     "data.retriever.qas.trivia-train": {
         "s3_url": "https://dl.fbaipublicfiles.com/dpr/data/retriever/trivia-train.qa.csv.gz",
         "original_ext": ".csv",
+        "compressed": True,
+        "desc": "Trivia train subset for Retriever validation and IR results generation",
+    },
+    "data.retriever.qas.grailqa-train": {
+        "s3_url": "https://dl.fbaipublicfiles.com/dpr/data/retriever/grailqa-train.qa.tsv.gz",
+        "original_ext": ".tsv",
         "compressed": True,
         "desc": "Trivia train subset for Retriever validation and IR results generation",
     },
@@ -203,17 +270,21 @@ RESOURCES_MAP = {
     },
     "data.retriever_results.nq.single.wikipedia_passages": {
         "s3_url": [
-            "https://dl.fbaipublicfiles.com/dpr/data/wiki_encoded/single/nq/wiki_passages_{}".format(i)
+            "https://dl.fbaipublicfiles.com/dpr/data/wiki_encoded/single/nq/wiki_passages_{}".format(
+                i
+            )
             for i in range(50)
         ],
         "original_ext": ".pkl",
         "compressed": False,
         "desc": "Encoded wikipedia files using a biencoder checkpoint("
         "checkpoint.retriever.single.nq.bert-base-encoder) trained on NQ dataset ",
-    },
+    },   
     "data.retriever_results.nq.single-adv-hn.wikipedia_passages": {
         "s3_url": [
-            "https://dl.fbaipublicfiles.com/dpr/data/wiki_encoded/single-adv-hn/nq/wiki_passages_{}".format(i)
+            "https://dl.fbaipublicfiles.com/dpr/data/wiki_encoded/single-adv-hn/nq/wiki_passages_{}".format(
+                i
+            )
             for i in range(50)
         ],
         "original_ext": ".pkl",
@@ -269,7 +340,12 @@ RESOURCES_MAP = {
         "The model is HF bert-base-uncased",
     },
     "data.reader.nq.single.train": {
-        "s3_url": ["https://dl.fbaipublicfiles.com/dpr/data/reader/nq/single/train.{}.pkl".format(i) for i in range(8)],
+        "s3_url": [
+            "https://dl.fbaipublicfiles.com/dpr/data/reader/nq/single/train.{}.pkl".format(
+                i
+            )
+            for i in range(8)
+        ],
         "original_ext": ".pkl",
         "compressed": False,
         "desc": "Reader model NQ train dataset input data preprocessed from retriever results (also trained on NQ)",
@@ -291,7 +367,9 @@ RESOURCES_MAP = {
     },
     "data.reader.trivia.multi-hybrid.train": {
         "s3_url": [
-            "https://dl.fbaipublicfiles.com/dpr/data/reader/trivia/multi-hybrid/train.{}.pkl".format(i)
+            "https://dl.fbaipublicfiles.com/dpr/data/reader/trivia/multi-hybrid/train.{}.pkl".format(
+                i
+            )
             for i in range(8)
         ],
         "original_ext": ".pkl",
@@ -381,13 +459,6 @@ RESOURCES_MAP = {
         "compressed": False,
         "desc": "TFIDF index when only Wikipedia pages seen during training are considered",
     },
-    # Universal retriever project data
-    "data.wikipedia_split.psgs_w100": {
-        "s3_url": "https://dl.fbaipublicfiles.com/dpr/wikipedia_split/psgs_w100.tsv.gz",
-        "original_ext": ".tsv",
-        "compressed": True,
-        "desc": "Entire wikipedia passages set obtain by splitting all pages into 100-word segments (no overlap)",
-    },
 }
 
 
@@ -419,18 +490,26 @@ def download_resource(
 
     logger.info("Download root_dir %s", root_dir)
 
-    save_root = os.path.join(root_dir, "downloads", *path_names[:-1])  # last segment is for file name
+    save_root = os.path.join(
+        root_dir, "downloads", *path_names[:-1]
+    )  # last segment is for file name
 
     pathlib.Path(save_root).mkdir(parents=True, exist_ok=True)
 
-    local_file_uncompressed = os.path.abspath(os.path.join(save_root, path_names[-1] + original_ext))
+    local_file_uncompressed = os.path.abspath(
+        os.path.join(save_root, path_names[-1] + original_ext)
+    )
     logger.info("File to be downloaded as %s", local_file_uncompressed)
 
     if os.path.exists(local_file_uncompressed):
         logger.info("File already exist %s", local_file_uncompressed)
         return save_root, local_file_uncompressed
 
-    local_file = os.path.abspath(os.path.join(save_root, path_names[-1] + (".tmp" if compressed else original_ext)))
+    local_file = os.path.abspath(
+        os.path.join(
+            save_root, path_names[-1] + (".tmp" if compressed else original_ext)
+        )
+    )
 
     wget.download(s3_url, out=local_file)
 
@@ -460,7 +539,6 @@ def download(resource_key: str, out_dir: str = None):
     if resource_key not in RESOURCES_MAP:
         # match by prefix
         resources = [k for k in RESOURCES_MAP.keys() if k.startswith(resource_key)]
-        logger.info("matched by prefix resources: %s", resources)
         if resources:
             for key in resources:
                 download(key, out_dir)
@@ -518,9 +596,9 @@ def main():
     if args.resource:
         download(args.resource, args.output_dir)
     else:
-        logger.warning("Please specify resource value. Possible options are:")
+        print("Please specify resource value. Possible options are:")
         for k, v in RESOURCES_MAP.items():
-            logger.warning("Resource key=%s  :  %s", k, v["desc"])
+            print("Resource key=%s  :  %s", k, v["desc"])
 
 
 if __name__ == "__main__":

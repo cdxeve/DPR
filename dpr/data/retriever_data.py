@@ -3,7 +3,7 @@ import csv
 import json
 import logging
 import pickle
-from typing import Dict, List
+from typing import Dict
 
 import hydra
 import jsonlines
@@ -14,17 +14,22 @@ from dpr.utils.data_utils import read_data_from_json_files
 from dpr.data.biencoder_data import (
     BiEncoderPassage,
     normalize_passage,
+    normalize_question,
     get_dpr_files,
     read_nq_tables_jsonl,
     split_tables_to_chunks,
     remove_double_space,
 )
+from dpr.utils.tasks import (
+    task_map,
+    get_prompt_files,
+)
 
-from dpr.utils.data_utils import normalize_question
-from dpr.utils.tasks import task_map, get_prompt_files
 logger = logging.getLogger(__name__)
+QASample = collections.namedtuple(
+    "QuerySample", ["query", "id", "answers", "meta_data"]
+)
 TableChunk = collections.namedtuple("TableChunk", ["text", "title", "table_id"])
-QASample = collections.namedtuple("QuerySample", ["query", "id", "answers", "meta_data"])
 
 
 class RetrieverData(torch.utils.data.Dataset):
@@ -39,7 +44,9 @@ class RetrieverData(torch.utils.data.Dataset):
         self.data_files = get_dpr_files(self.file)
         assert (
             len(self.data_files) == 1
-        ), "RetrieverData source currently works with single files only. Files specified: {}".format(self.data_files)
+        ), "RetrieverData source currently works with single files only. Files specified: {}".format(
+            self.data_files
+        )
         self.file = self.data_files[0]
 
 
@@ -66,100 +73,11 @@ class QASrc(RetrieverData):
     def _process_question(self, question: str):
         # as of now, always normalize query
         question = normalize_question(question)
-        if self.query_special_suffix and not question.endswith(self.query_special_suffix):
+        if self.query_special_suffix and not question.endswith(
+            self.query_special_suffix
+        ):
             question += self.query_special_suffix
         return question
-
-class UpriseQASrc(QASrc):
-    '''
-    Data Class for Task input for Uprise,
-    modified based on QASrc in this file,
-    we regard `question` in QASrc as `task_input` in Uprise
-    '''
-    def __init__(
-        self,
-        task_name,
-        file="",
-        selector: DictConfig = None,
-        question_attr: str = "question",
-        answers_attr: str = "answers",
-        id_attr: str = "id",
-        special_query_token: str = None,
-        query_special_suffix: str = None,
-        cache_dir: str = None,
-        task_setup_type: str = "q",
-    ):
-        super().__init__(file, selector, special_query_token, query_special_suffix)
-        self.task = task_map.cls_dic[task_name]()
-        logger.info("loading task evaluation split...")
-        # load evaluation split defined in task.py
-        self.data = self.task.get_dataset( 
-            split=None, cache_dir=cache_dir
-        )
-        self.get_question = self.task.get_question
-        assert (
-            task_setup_type == "q"
-        ), "when testing, the setup should only be q, no answer can be included"
-
-    def load_data(self):
-        data = []
-        for id, jline in enumerate(self.data):
-            jline["id"] = id
-            question = self.get_question(jline)
-            question = remove_double_space(question)
-            answers = ["None"]
-            data.append(QASample(question, id, answers, jline))
-        self.data = data
-
-
-
-class UpriseCtxSrc(RetrieverData):
-    '''
-    Data Class for Prompt for Uprise,
-    modified based on RetrieverData in this file,
-    we regard `passage` in RetrieverData as `prompt` in Uprise
-    '''
-    def __init__(
-        self,
-        file="",
-        id_col: int = 0,
-        text_col: int = 1,
-        title_col: int = 2,
-        id_prefix: str = None,
-        prompt_pool_path: str = None,
-        prompt_setup_type=None,
-        train_clusters: str = None,
-    ):
-        super().__init__(file)
-        self.file = file
-        self.text_col = text_col
-        self.title_col = title_col
-        self.id_col = id_col
-        self.id_prefix = id_prefix
-        self.prompt_setup_type = prompt_setup_type
-        if train_clusters != None:
-            prompt_pool_path = get_prompt_files(prompt_pool_path, train_clusters)
-        logger.info("prompt files: %s", prompt_pool_path)
-        self.prompt_pool = read_data_from_json_files(prompt_pool_path)
-        logger.info("prompt passages num : %d", len(self.prompt_pool))
-
-    def load_data_to(self, ctxs: Dict[object, BiEncoderPassage]):
-        for sample_id, entry in enumerate(self.prompt_pool):
-            task = task_map.cls_dic[entry["task_name"]]()
-            
-            if self.prompt_setup_type == "q":
-                passage = task.get_question(entry)
-            elif self.prompt_setup_type == "a":
-                passage = task.get_answer(entry)
-            elif self.prompt_setup_type == "qa":
-                passage = (
-                    task.get_question(entry)
-                    + task.get_answer(entry)
-                )
-            passage = remove_double_space(passage)
-            ctxs[sample_id] = BiEncoderPassage(
-                passage, "", entry
-            ) # pass the entry as metadata
 
 
 class CsvQASrc(QASrc):
@@ -172,23 +90,15 @@ class CsvQASrc(QASrc):
         selector: DictConfig = None,
         special_query_token: str = None,
         query_special_suffix: str = None,
-        data_range_start: int = -1,
-        data_size: int = -1,
     ):
         super().__init__(file, selector, special_query_token, query_special_suffix)
         self.question_col = question_col
         self.answers_col = answers_col
         self.id_col = id_col
-        self.data_range_start = data_range_start
-        self.data_size = data_size
 
     def load_data(self):
         super().load_data()
         data = []
-        start = self.data_range_start
-        # size = self.data_size
-        samples_count = 0
-        # TODO: optimize
         with open(self.file) as ifile:
             reader = csv.reader(ifile, delimiter="\t")
             for row in reader:
@@ -197,17 +107,8 @@ class CsvQASrc(QASrc):
                 id = None
                 if self.id_col >= 0:
                     id = row[self.id_col]
-                samples_count += 1
-                # if start !=-1 and samples_count<=start:
-                #    continue
                 data.append(QASample(self._process_question(question), id, answers))
-
-        if start != -1:
-            end = start + self.data_size if self.data_size != -1 else -1
-            logger.info("Selecting dataset range [%s,%s]", start, end)
-            self.data = data[start:end] if end != -1 else data[start:]
-        else:
-            self.data = data
+        self.data = data
 
 
 class JsonlQASrc(QASrc):
@@ -251,8 +152,6 @@ class KiltCsvQASrc(CsvQASrc):
         selector: DictConfig = None,
         special_query_token: str = None,
         query_special_suffix: str = None,
-        data_range_start: int = -1,
-        data_size: int = -1,
     ):
         super().__init__(
             file,
@@ -262,8 +161,6 @@ class KiltCsvQASrc(CsvQASrc):
             selector,
             special_query_token,
             query_special_suffix,
-            data_range_start,
-            data_size,
         )
         self.kilt_gold_file = kilt_gold_file
 
@@ -355,22 +252,132 @@ class CsvCtxSrc(RetrieverData):
 
     def load_data_to(self, ctxs: Dict[object, BiEncoderPassage]):
         super().load_data()
-        logger.info("Reading file %s", self.file)
         with open(self.file) as ifile:
             reader = csv.reader(ifile, delimiter="\t")
             for row in reader:
-                # for row in ifile:
-                # row = row.strip().split("\t")
                 if row[self.id_col] == "id":
                     continue
                 if self.id_prefix:
                     sample_id = self.id_prefix + str(row[self.id_col])
                 else:
                     sample_id = row[self.id_col]
-                passage = row[self.text_col].strip('"')
+                passage = row[self.text_col]
                 if self.normalize:
                     passage = normalize_passage(passage)
                 ctxs[sample_id] = BiEncoderPassage(passage, row[self.title_col])
+
+
+class UpriseQASrc(QASrc):
+    def __init__(
+        self,
+        task_name,
+        file="",
+        selector: DictConfig = None,
+        question_attr: str = "question",
+        answers_attr: str = "answers",
+        id_attr: str = "id",
+        special_query_token: str = None,
+        query_special_suffix: str = None,
+        cache_dir: str = None,
+        task_setup_type: str = "q",
+    ):
+        super().__init__(file, selector, special_query_token, query_special_suffix)
+        self.task = task_map.cls_dic[task_name]()
+        logger.info("loading task evaluation split...")
+        # load evaluation split defined in task.py
+        self.data = self.task.get_dataset( 
+            split=None, cache_dir=cache_dir
+        )
+        self.get_question = self.task.get_question
+        assert (
+            task_setup_type == "q"
+        ), "when testing, the setup should only be q, no answer can be included"
+
+    def load_data(self):
+        data = []
+        for id, jline in enumerate(self.data):
+            jline["id"] = id
+            question = self.get_question(jline)
+            question = remove_double_space(question)
+            answers = ["None"]
+            data.append(QASample(question, id, answers, jline))
+        self.data = data
+
+
+def reformat(text):
+    return " ".join([f"{i+1}#) {x.strip()}" for i, x in enumerate(text.split(";"))])
+
+
+class UpriseCtxSrc(RetrieverData):
+    def __init__(
+        self,
+        file="",
+        id_col: int = 0,
+        text_col: int = 1,
+        title_col: int = 2,
+        id_prefix: str = None,
+        prompt_pool_path: str = None,
+        prompt_setup_type=None,
+        train_clusters: str = None,
+    ):
+        super().__init__(file)
+        self.file = file
+        self.text_col = text_col
+        self.title_col = title_col
+        self.id_col = id_col
+        self.id_prefix = id_prefix
+        self.prompt_setup_type = prompt_setup_type
+        if train_clusters != None:
+            prompt_pool_path = get_prompt_files(prompt_pool_path, train_clusters)
+        logger.info("prompt files: %s", prompt_pool_path)
+        self.prompt_pool = read_data_from_json_files(prompt_pool_path)
+        logger.info("prompt passages num : %d", len(self.prompt_pool))
+
+    def load_data_to(self, ctxs: Dict[object, BiEncoderPassage]):
+        for sample_id, entry in enumerate(self.prompt_pool):
+            task = task_map.cls_dic[entry["task_name"]]()
+            
+            if self.prompt_setup_type == "q":
+                passage = task.get_question(entry)
+            elif self.prompt_setup_type == "a":
+                passage = task.get_answer(entry)
+            elif self.prompt_setup_type == "qa":
+                passage = (
+                    task.get_question(entry)
+                    + task.get_answer(entry)
+                )
+            passage = remove_double_space(passage)
+            ctxs[sample_id] = BiEncoderPassage(
+                passage, "", entry
+            ) # pass the entry as metadata
+
+class JsonCtxSrc(RetrieverData):
+    def __init__(
+        self,
+        file: str,
+        id_col: int = 0,
+        text_col: int = 1,
+        title_col: int = 2,
+        id_prefix: str = None,
+        normalize: bool = False,
+    ):
+        super().__init__(file)
+        self.text_col = text_col
+        self.title_col = title_col
+        self.id_col = id_col
+        self.id_prefix = id_prefix
+        self.normalize = normalize
+
+    def load_data_to(self, ctxs: Dict[object, BiEncoderPassage]):
+        super().load_data()
+        with open(self.file) as ifile:
+            reader = json.load(ifile)
+            for row in reader:
+                sample_id = row["id"]
+                passage = row["text"]
+                if self.normalize:
+                    passage = normalize_passage(passage)
+                ctxs[sample_id] = BiEncoderPassage(passage, row["title"])
 
 
 class KiltCsvCtxSrc(CsvCtxSrc):
@@ -384,7 +391,9 @@ class KiltCsvCtxSrc(CsvCtxSrc):
         id_prefix: str = None,
         normalize: bool = False,
     ):
-        super().__init__(file, id_col, text_col, title_col, id_prefix, normalize=normalize)
+        super().__init__(
+            file, id_col, text_col, title_col, id_prefix, normalize=normalize
+        )
         self.mapping_file = mapping_file
 
     def convert_to_kilt(self, kilt_gold_file, dpr_output, kilt_out_file):
@@ -402,7 +411,7 @@ class KiltCsvCtxSrc(CsvCtxSrc):
 
         with jsonlines.open(kilt_out_file, mode="w") as writer:
             for dpr_entry, kilt_gold_entry in zip(dpr_output, kilt_gold_file):
-                # assert dpr_entry["question"] == kilt_gold_entry["input"]
+                assert dpr_entry["question"] == kilt_gold_entry["input"]
                 provenance = []
                 for ctx in dpr_entry["ctxs"]:
                     wikipedia_id, end_paragraph_id = mapping[int(ctx["id"])]
@@ -414,7 +423,7 @@ class KiltCsvCtxSrc(CsvCtxSrc):
                     )
                 kilt_entry = {
                     "id": kilt_gold_entry["id"],
-                    "input": kilt_gold_entry["input"],  # dpr_entry["question"],
+                    "input": dpr_entry["question"],
                     "output": [{"provenance": provenance}],
                 }
                 writer.write(kilt_entry)
@@ -439,7 +448,9 @@ class JsonlTablesCtxSrc(object):
         docs = {}
         logger.info("Parsing Tables data from: %s", self.file)
         tables_dict = read_nq_tables_jsonl(self.file)
-        table_chunks = split_tables_to_chunks(tables_dict, self.tables_chunk_sz, split_type=self.split_type)
+        table_chunks = split_tables_to_chunks(
+            tables_dict, self.tables_chunk_sz, split_type=self.split_type
+        )
         for chunk in table_chunks:
             sample_id = self.id_prefix + str(chunk[0])
             docs[sample_id] = TableChunk(chunk[1], chunk[2], chunk[3])
