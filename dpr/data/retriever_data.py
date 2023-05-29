@@ -10,26 +10,21 @@ import jsonlines
 import torch
 from omegaconf import DictConfig
 
+from dpr.utils.data_utils import read_data_from_json_files
 from dpr.data.biencoder_data import (
     BiEncoderPassage,
     normalize_passage,
     get_dpr_files,
     read_nq_tables_jsonl,
     split_tables_to_chunks,
+    remove_double_space,
 )
 
 from dpr.utils.data_utils import normalize_question
-
+from dpr.utils.tasks import task_map, get_prompt_files
 logger = logging.getLogger(__name__)
-
 TableChunk = collections.namedtuple("TableChunk", ["text", "title", "table_id"])
-
-
-class QASample:
-    def __init__(self, query: str, id, answers: List[str]):
-        self.query = query
-        self.id = id
-        self.answers = answers
+QASample = collections.namedtuple("QuerySample", ["query", "id", "answers", "meta_data"])
 
 
 class RetrieverData(torch.utils.data.Dataset):
@@ -74,6 +69,97 @@ class QASrc(RetrieverData):
         if self.query_special_suffix and not question.endswith(self.query_special_suffix):
             question += self.query_special_suffix
         return question
+
+class UpriseQASrc(QASrc):
+    '''
+    Data Class for Task input for Uprise,
+    modified based on QASrc in this file,
+    we regard `question` in QASrc as `task_input` in Uprise
+    '''
+    def __init__(
+        self,
+        task_name,
+        file="",
+        selector: DictConfig = None,
+        question_attr: str = "question",
+        answers_attr: str = "answers",
+        id_attr: str = "id",
+        special_query_token: str = None,
+        query_special_suffix: str = None,
+        cache_dir: str = None,
+        task_setup_type: str = "q",
+    ):
+        super().__init__(file, selector, special_query_token, query_special_suffix)
+        self.task = task_map.cls_dic[task_name]()
+        logger.info("loading task evaluation split...")
+        # load evaluation split defined in task.py
+        self.data = self.task.get_dataset( 
+            split=None, cache_dir=cache_dir
+        )
+        self.get_question = self.task.get_question
+        assert (
+            task_setup_type == "q"
+        ), "when testing, the setup should only be q, no answer can be included"
+
+    def load_data(self):
+        data = []
+        for id, jline in enumerate(self.data):
+            jline["id"] = id
+            question = self.get_question(jline)
+            question = remove_double_space(question)
+            answers = ["None"]
+            data.append(QASample(question, id, answers, jline))
+        self.data = data
+
+
+
+class UpriseCtxSrc(RetrieverData):
+    '''
+    Data Class for Prompt for Uprise,
+    modified based on RetrieverData in this file,
+    we regard `passage` in RetrieverData as `prompt` in Uprise
+    '''
+    def __init__(
+        self,
+        file="",
+        id_col: int = 0,
+        text_col: int = 1,
+        title_col: int = 2,
+        id_prefix: str = None,
+        prompt_pool_path: str = None,
+        prompt_setup_type=None,
+        train_clusters: str = None,
+    ):
+        super().__init__(file)
+        self.file = file
+        self.text_col = text_col
+        self.title_col = title_col
+        self.id_col = id_col
+        self.id_prefix = id_prefix
+        self.prompt_setup_type = prompt_setup_type
+        if train_clusters != None:
+            prompt_pool_path = get_prompt_files(prompt_pool_path, train_clusters)
+        logger.info("prompt files: %s", prompt_pool_path)
+        self.prompt_pool = read_data_from_json_files(prompt_pool_path)
+        logger.info("prompt passages num : %d", len(self.prompt_pool))
+
+    def load_data_to(self, ctxs: Dict[object, BiEncoderPassage]):
+        for sample_id, entry in enumerate(self.prompt_pool):
+            task = task_map.cls_dic[entry["task_name"]]()
+            
+            if self.prompt_setup_type == "q":
+                passage = task.get_question(entry)
+            elif self.prompt_setup_type == "a":
+                passage = task.get_answer(entry)
+            elif self.prompt_setup_type == "qa":
+                passage = (
+                    task.get_question(entry)
+                    + task.get_answer(entry)
+                )
+            passage = remove_double_space(passage)
+            ctxs[sample_id] = BiEncoderPassage(
+                passage, "", entry
+            ) # pass the entry as metadata
 
 
 class CsvQASrc(QASrc):

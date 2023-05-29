@@ -29,7 +29,7 @@ n_docs: 100
 validation_workers: 16
 
 # Batch size to generate query embeddings
-batch_size: 128
+batch_size: 512
 
 # Whether to lower case the input text. Set True for uncased models, False for the cased ones.
 do_lower_case: True

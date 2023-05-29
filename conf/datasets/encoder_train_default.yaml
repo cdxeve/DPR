@@ -1,4 +1,39 @@
+train_file: ???
+valid_file: ???
+top_k: ???
+hard_neg: ???
+prompt_pool_path: ???
+prompt_setup_type: ???
+task_setup_type: ???
+train_clusters: 
+multi_task: false
+
 # @package _group_
+
+uprise_dataset:
+  _target_: dpr.data.biencoder_data.UpriseDataset
+  file: ${..train_file}
+  top_k: ${..top_k}
+  hard_neg: ${..hard_neg}
+  prompt_pool_path: ${..prompt_pool_path}
+  prompt_setup_type: ${..prompt_setup_type}
+  task_setup_type: ${..task_setup_type}
+  train_clusters: ${..train_clusters}
+  multi_task: ${..multi_task}
+  split: train
+
+#for validation
+uprise_valid_dataset:
+  _target_: dpr.data.biencoder_data.UpriseDataset
+  file: ${..valid_file} 
+  top_k: ${..top_k}
+  hard_neg: ${..hard_neg}
+  prompt_pool_path: ${..prompt_pool_path}
+  prompt_setup_type: ${..prompt_setup_type}
+  task_setup_type: ${..task_setup_type}
+  train_clusters: ${..train_clusters}
+  multi_task: ${..multi_task}
+  split: valid
 
 nq_train:
   _target_: dpr.data.biencoder_data.JsonQADataset

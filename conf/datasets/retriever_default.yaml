@@ -1,5 +1,11 @@
 # @package _group_
 
+qa_uprise:
+  _target_: dpr.data.retriever_data.UpriseQASrc
+  task_name: ???
+  cache_dir: ???
+  task_setup_type: q
+
 nq_test:
   _target_: dpr.data.retriever_data.CsvQASrc
   file: data.retriever.qas.nq-test

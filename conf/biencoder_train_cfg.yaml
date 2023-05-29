@@ -40,7 +40,7 @@ fp16: False
 #        "See details at https://nvidia.github.io/apex/amp.html
 fp16_opt_level: O1
 
-# tokens which won't be slit by tokenizer
+# tokens which won't be split by tokenizer
 special_tokens:
 
 ignore_checkpoint_offset: False

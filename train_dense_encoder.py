@@ -219,6 +219,7 @@ class BiEncoderTrainer(object):
                 self.best_validation_result = validation_loss
                 self.best_cp_name = cp_name
                 logger.info("New Best validation checkpoint %s", cp_name)
+                self._save_checkpoint(scheduler, 'best_valid', iteration)
 
     def validate_nll(self) -> float:
         logger.info("NLL validation ...")

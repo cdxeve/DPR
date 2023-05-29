@@ -16,7 +16,7 @@ import pickle
 import time
 import zlib
 from typing import List, Tuple, Dict, Iterator
-
+import os
 import hydra
 import numpy as np
 import torch
@@ -341,6 +341,7 @@ def save_results(
     top_passages_and_scores: List[Tuple[List[object], List[float]]],
     per_question_hits: List[List[bool]],
     out_file: str,
+    meta_data, # for uprise
 ):
     # join passages text with the result ids, their questions and assigning has|no answer labels
     merged_data = []
@@ -352,17 +353,18 @@ def save_results(
         docs = [passages[doc_id] for doc_id in results_and_scores[0]]
         scores = [str(score) for score in results_and_scores[1]]
         ctxs_num = len(hits)
+        meta=meta_data[i]
 
         results_item = {
-            "question": q,
-            "answers": q_answers,
+            "task_input": q,
+            # "answers": q_answers,
+            "meta_data": meta,
             "ctxs": [
                 {
-                    "id": results_and_scores[0][c],
-                    "title": docs[c][1],
-                    "text": docs[c][0],
+                    "id_in_prompt_pool": results_and_scores[0][c], # id in the prompt pool
+                    "prompt_text": docs[c][0],
                     "score": scores[c],
-                    "has_answer": hits[c],
+                    "meta_data":docs[c][2] 
                 }
                 for c in range(ctxs_num)
             ],
@@ -373,7 +375,7 @@ def save_results(
         #    results_item[questions_extra_attr] = extra
 
         merged_data.append(results_item)
-
+    os.makedirs(os.path.dirname(out_file), exist_ok=True)
     with open(out_file, "w") as writer:
         writer.write(json.dumps(merged_data, indent=4) + "\n")
     logger.info("Saved results * scores  to %s", out_file)

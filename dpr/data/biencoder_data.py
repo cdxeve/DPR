@@ -11,18 +11,27 @@ from omegaconf import DictConfig
 
 from dpr.data.tables import Table
 from dpr.utils.data_utils import read_data_from_json_files, Dataset
+from dpr.utils.tasks import task_map, get_prompt_files
+import re
 
 logger = logging.getLogger(__name__)
-BiEncoderPassage = collections.namedtuple("BiEncoderPassage", ["text", "title"])
+BiEncoderPassage = collections.namedtuple("BiEncoderPassage", ["text", "title", "meta_data"])
 
 
-def get_dpr_files(source_name) -> List[str]:
-    if os.path.exists(source_name) or glob.glob(source_name):
-        return glob.glob(source_name)
-    else:
-        # try to use data downloader
-        from dpr.data.download_data import download
-        return download(source_name)
+def get_dpr_files(sources) -> List[str]:
+    if isinstance(sources, str):
+        sources = [sources] 
+    res = []
+    for source_name in sources:
+        if os.path.exists(source_name) or glob.glob(source_name):
+            res.extend(glob.glob(source_name))
+        else:
+            # try to use data downloader
+            from dpr.data.download_data import download
+
+            res.extend(download(source_name))
+    logger.info("Toal files num %d" % len(res))
+    return res
 
 
 class BiEncoderSample(object):
@@ -31,6 +40,188 @@ class BiEncoderSample(object):
     negative_passages: List[BiEncoderPassage]
     hard_negative_passages: List[BiEncoderPassage]
 
+
+def remove_double_space(string):
+    return re.sub("[ ]{2,}", " ", string)
+
+class UpriseDataset(Dataset):
+    '''
+    modified based on JsonQADataset class in this file
+    we regard `question` in JsonQADataset as `task input` in UpriseDataset
+    and `ctxs` in JsonQADataset as `prompts` in UpriseDataset
+    '''
+    def __init__(
+        self,
+        file: str,
+        top_k,
+        train_clusters: str = None,
+        multi_task: bool = False,
+        split: str = None,
+        hard_neg=False,
+        selector: DictConfig = None,
+        special_token: str = None,
+        encoder_type: str = None,
+        shuffle_positives: bool = False,
+        query_special_suffix: str = None,
+        prompt_pool_path: str = None,
+        prompt_setup_type: str = "q",
+        task_setup_type: str = "q",
+    ):
+        super().__init__(
+            selector,
+            special_token=special_token,
+            encoder_type=encoder_type,
+            shuffle_positives=shuffle_positives,
+            query_special_suffix=query_special_suffix,
+        )
+        self.split = split
+        self.top_k = top_k
+        self.file = file
+        self.hard_neg = hard_neg
+        self.data = []
+
+        if train_clusters is not None:
+            prompt_pool_path = get_prompt_files(prompt_pool_path, train_clusters)
+        logger.info("prompt files: %s", prompt_pool_path)
+        self.prompt_pool = read_data_from_json_files(prompt_pool_path)
+        logger.info("prompt passages num : %d", len(self.prompt_pool))
+        self.train_clusters = train_clusters
+        self.multi_task = multi_task
+        self.prompt_setup_type = prompt_setup_type
+        self.task_setup_type = task_setup_type
+
+    def format_example(self, entry, setup_type):
+        task = task_map.cls_dic[entry["task_name"]]()
+        if setup_type == "qa":
+            sent = (
+                task.get_question(entry)
+                + task.get_answer(entry)
+            )
+        elif setup_type == "q":
+            sent = task.get_question(entry)
+        elif setup_type == "a":
+            sent = task.get_answer(entry).strip()
+        return remove_double_space(sent)
+
+    def get_entry(self, entry):
+        task_name = entry["task_name"]
+        # positive prompts
+        true_cntxs = [
+            ctx_entry
+            for ctx_entry in entry["ctxs"]
+            if (ctx_entry["one_shot_acc"] == True or ctx_entry["one_shot_acc"] > 0)
+        ] # filter out those with acc == 0
+        positive_cntx = [
+            {"demonstration": self.format_example(p_example, self.prompt_setup_type)}
+            for p_example in true_cntxs[:1]
+        ]  # select the first-ranked prompt as the positive
+        positive_ids = [ctx_entry['id'] for ctx_entry in true_cntxs[:1]] 
+
+        # hard negative prompts
+        # remember to ensure `topk` = `num_of_negatives` if you want the hard negatives to be the last k-ranked prompts
+        hard_negative_ctxs = [
+            {"demonstration": self.format_example(n_example, self.prompt_setup_type)}
+            for n_example in entry["ctxs"][-self.top_k :]
+        ]
+        hard_negative_ids = [
+            n_example['id']
+            for n_example in entry["ctxs"][-self.top_k :]
+        ]
+
+        # negative prompts
+        if self.multi_task:
+            # when multi_task == True,
+            # random sample those of different tasks as negatives
+            negative_cntx = [
+                {"demonstration": self.format_example(n_example, self.prompt_setup_type)}
+                for n_example in random.choices(self.prompt_pool, k=self.top_k)
+                if not n_example["task_name"] == task_name
+            ] 
+        else:
+            # when multi_task == False, 
+            # random sample negatives from the same training set, 
+            # but avoid choosing those already existed the the positives/hard negatives
+            negative_cntx = [
+                {"demonstration": self.format_example(n_example, self.prompt_setup_type)}
+                for n_example in random.choices(self.prompt_pool, k=self.top_k)
+                if not n_example["id"] in positive_ids + hard_negative_ids
+            ]
+
+        question = self.format_example(entry, self.task_setup_type)
+        entry = {
+            "question": question, # `question` <--> `task input` in uprise
+            "answers": [],
+            "positive_ctxs": positive_cntx, # `ctx` <--> `prompt` in uprise
+            "negative_ctxs": negative_cntx,
+        }
+        if self.hard_neg:
+            entry["hard_negative_ctxs"] = hard_negative_ctxs
+        return entry
+
+    def load_data(self):
+        assert self.split in ["train", "valid"]
+        if self.train_clusters is not None:
+            clusters = self.train_clusters.split('+')
+            self.file = [
+                f"{self.file}/{cluster}/*_scored_{self.split}.json"
+                for cluster in clusters
+            ]
+        logger.info("cluster files: %s", self.file)
+
+        self.data_files = get_dpr_files(self.file)
+        logger.info("dpr files: %s", self.data_files)
+
+        raw_data = read_data_from_json_files(self.data_files)
+        self.data = []
+        for entry in raw_data:
+            self.data.append(self.get_entry(entry))
+        # filter out those without positive prompts (ctxs)
+        self.data = [r for r in self.data if len(r["positive_ctxs"]) > 0]
+        logger.info("filter out data for : {}".format(len(raw_data) - len(self.data)))
+        logger.info("Total filtered data size: {}".format(len(self.data)))
+
+    def __getitem__(self, index) -> BiEncoderSample:
+        json_sample = self.data[index]
+        r = BiEncoderSample()
+        r.query = json_sample["question"]
+
+        positive_ctxs = json_sample["positive_ctxs"]
+        negative_ctxs = (
+            json_sample["negative_ctxs"] if "negative_ctxs" in json_sample else []
+        )
+        hard_negative_ctxs = (
+            json_sample["hard_negative_ctxs"]
+            if "hard_negative_ctxs" in json_sample
+            else []
+        )
+
+        for ctx in positive_ctxs + negative_ctxs + hard_negative_ctxs:
+            if "title" not in ctx:
+                ctx["title"] = None
+
+        def create_passage(ctx: dict):
+            return BiEncoderPassage(
+                ctx["demonstration"], ctx["title"], None  # meta_data=None
+            )
+
+        r.positive_passages = [create_passage(ctx) for ctx in positive_ctxs]
+        r.negative_passages = [create_passage(ctx) for ctx in negative_ctxs]
+        r.hard_negative_passages = [create_passage(ctx) for ctx in hard_negative_ctxs]
+        return r
+
+    def __len__(self):
+        return len(self.data)
+
+    def get_qas(self) -> Tuple[List[str], List[str]]:
+        return [s["question"] for s in self.data], [s["answers"] for s in self.data]
+
+    def get_qas_range(
+        self, start_idx: int, end_idx: int
+    ) -> Tuple[List[str], List[str]]:
+        return (
+            [s["question"] for s in self.data[start_idx:end_idx]],
+            [s["answers"] for s in self.data[start_idx:end_idx]],
+        )
 
 class JsonQADataset(Dataset):
     def __init__(
