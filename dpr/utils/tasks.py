@@ -18,6 +18,13 @@ train_cluster_map = {
     "sentiment": ["yelp", "sentiment140", "sst2"],
     "struct2text": ["common_gen", "e2e_nlg", "dart"],
     "summarize": ["aeslc", "ag_news", "gigaword"],
+
+    # train examples for a quick try
+    "train_example_1": ["rte"],
+    "train_example_2": ["copa", "piqa"],
+
+    # cot prompting example
+    "cot_train_example": ["pubmed_qa"]
 }
 test_cluster_map = {
     "close_qa": ["natural_questions", "arc_c", "arc_e"],
@@ -29,6 +36,13 @@ test_cluster_map = {
     "sentiment": ["yelp", "sentiment140", "sst2"],
     "struct2text": ["common_gen", "e2e_nlg", "dart"],
     "summarize": ["aeslc", "ag_news", "gigaword"],
+    
+    # test examples for a quick try
+    "test_example_1": ["arc_e"],
+    "test_example_2": ["mrpc"],
+    
+    # cot prompting example
+    "cot_test_example": ["pubmed_qa"]
 }
 
 
@@ -96,11 +110,14 @@ class BaseTask(object):
             x = data[:ds_size]
         return x
 
-    def get_template(self, entry):
+    def get_template(self, entry, return_answer = False):
         '''
         random sample a template for each entry
         '''
-        templates = [p[0] for p in self.get_templates()]
+        if return_answer:
+            templates = [p[1] for p in self.get_templates()]
+        else:
+            templates = [p[0] for p in self.get_templates()]
         random.seed(entry["id"]) # fix random seed for reproduction
         template = random.choice(templates)
         return template
@@ -591,11 +608,13 @@ class Squad_v1(BaseTask):
         return answers
 
     # get label completion(s), the squad metric requires the label to be a list of string(s)
+    # get_label is for caculating metric scores, so we need to return all label strings
     def get_label(self, entry):
         label = entry["answers"]["text"]
         return label
 
-    # label completion, return a string to align with multiple choice task
+    # get_answer function is for constructing demonstration in the prompt pool,
+    # return a string
     def get_answer(self, entry):
         return ' '+entry["answers"]["text"][0]
 
@@ -1723,3 +1742,84 @@ class Gigaword(BaseTask):
 
     def get_answer(self, entry):
         return " " + entry["summary"]
+
+# ========================== Exploration Example: Chain-of-Thought Prompting ========================
+# define your cot prompting task
+@task_map.add("pubmed_qa")
+class Pubmed_qa(BaseTask):
+    def __init__(self):
+        super().__init__()
+        self.class_num = 1 # we regard cot as a text completion task
+        self.metric = "pubmed_qa_acc"
+        self.cluster = "reading"
+
+    # get dataset splits
+    def get_dataset(self, split=None, ds_size=None, cache_dir=None):
+        dataset = load_dataset("pubmed_qa", 'pqa_labeled', cache_dir=cache_dir)
+        # pubmed_qa has no validation splits, we create our own random evaluations splits
+        split_ratio = 0.8
+        data = list(dataset['train'].shuffle(seed=42))
+        if split == "train":
+            return data[:int(len(data)*split_ratio)]
+        else:  
+            return data[int(len(data)*split_ratio):]
+
+    # define cot task templates to transfer the datasets to instructions, 
+    # we use the templates of `synth_cot_cosmos_qa` in FLANv2: https://github.com/google-research/FLAN/blob/main/flan/v2/templates.py
+    # Remove the newline character for better prompting performance (especially for small LLMs)
+    def get_templates(self):
+        return [
+            ("{context} Question: {question} Yes, No, or Maybe? Let's answer step by step.", "{cot} So the answer is {answer}"),
+            ("{context} Q: {question} Yes, No, or Maybe? Step by step reasoning:", "{cot} The answer is {answer}"),
+            ("{context} Let's answer this carefully: {question} Yes, No, or Maybe?", "{cot} The answer is {answer}"),
+            ("{context} Based on the preceding passage, answer question {question} Yes, No, or Maybe? Let's solve slowly:", "{cot} The answer is {answer}"),
+            ("{context} Solve the following question thinking out loud: {question} Yes, No, or Maybe?", "{cot} So, the answer is {answer}"),
+            ("Context: {context} Question: {question} Yes, No, or Maybe? Let's think:", "{cot}... So the answer is {answer}"),
+            ("Read the following article and answer the question. {context} {question} Yes, No, or Maybe? ... Chain-of-thought:", "{cot} The answer is {answer}"),
+            ("Answer the question about text: {context} {question} Yes, No, or Maybe? CoT:", "{cot} The answer is {answer}"),
+            ("{context} Question: {question} Yes, No, or Maybe? Chain-of-thought:", "{cot} The answer is {answer}"),
+            ("Context: {context} Q: {question} Yes, No, or Maybe? Step-by-step reasoning process:", "{cot} The answer is {answer}"),
+            ]
+
+    # random_sample one template to convert the task input to an instruction
+    def get_question(self, entry):
+        question = entry["question"]
+        meta_context = entry["context"]
+        contexts=[]
+        for i, label in enumerate(meta_context["labels"]):
+            content = meta_context["contexts"][i]
+            sub_title = label[0]+label[1:].lower()
+            contexts.append(f'({sub_title}) {content}')
+        context = '\n'.join(contexts)
+        question_template = self.get_template(entry, return_answer=False)
+        return question_template.replace("{context}", context).replace("{question}", question)
+
+    # wrap the question as a list for scoring/inference, align with mutiple choice task
+    def get_input_strs(self, entry):
+        text = self.get_question(entry)
+        return [text]
+
+    # wrap answer as a list for scoring/inference
+    def get_answers(self, entry):
+        cot = entry["long_answer"]
+        answer = entry["final_decision"]
+
+        # we fix the random seed as the entry["id"] when sampling the question and answer templates,
+        # thus the question and answer templates always correspond to each other
+        answer_template = self.get_template(entry, return_answer=True)
+        answer_template = answer_template.replace('{cot}', cot).replace('{answer}', answer)
+        answers = [' ' + answer_template]
+        return answers
+
+    # get label completion(s) for calculating cot acc
+    def get_label(self, entry):
+        label = entry["final_decision"]
+        return label
+
+    # the get_answer function is for constructing demonstration in the prompt pool, we return a string
+    def get_answer(self, entry):
+        cot = entry["long_answer"]
+        answer = entry["final_decision"]
+
+        answer_template = self.get_template(entry, return_answer=True)
+        return ' ' + answer_template.replace('{cot}', cot).replace('{answer}', answer)
